@@ -1,877 +1,870 @@
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import json
+import os
+import re
 import random
 import string
-from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
-### توكنك هنا
-TOKEN ='8554107823:AAG-YHE7DqNgAihEgRGYSiy0TL-S5QWmur4'
-### id الادمن هنا
-YOUR_ADMIN_ID = 1595285929
+# إعدادات البوت
+TOKEN = '8554107823:AAG-YHE7DqNgAihEgRGYSiy0TL-S5QWmur4'  # توكن بوتك
+ADMIN_ID = 1595285929  # ايدي المطور
+ADMIN_USERNAME = 'NTBgg'  # معرف الادمن دون @
+PROOF_CHANNEL_ID = '1003682497574'  # ايدي قناة الاثبات
+PROOF_CHANNEL_USERNAME = '@ps01ps'  # معرف قناة إثبات
+SUDO_USERS = [ADMIN_ID, 000, 0000]  # ايدهات الادمن
 
 bot = telebot.TeleBot(TOKEN)
 
+# ملفات التخزين
+SALES_FILE = 'sales.json'
+AMR0_FILE = 'AMR0.txt'
+AMR1_FILE = 'AMR1.txt'
+USERS_FILE = 'AMR4.txt'
+AMR_FILE = 'AMR.txt'
+AMR3_FILE = 'AMR3.txt'
 
+# تهيئة الملفات إذا لم تكن موجودة
+def init_files():
+    files_config = {
+        SALES_FILE: {"sales": {}, "mode": None},
+        AMR0_FILE: "",
+        AMR1_FILE: "",
+        USERS_FILE: "",
+        AMR_FILE: "",
+        AMR3_FILE: ""
+    }
+    
+    for file, default_content in files_config.items():
+        if not os.path.exists(file):
+            if file.endswith('.json'):
+                with open(file, 'w', encoding='utf-8') as f:
+                    json.dump(default_content, f, ensure_ascii=False)
+            else:
+                with open(file, 'w', encoding='utf-8') as f:
+                    f.write(str(default_content))
 
-users_data = {}
-admin_data = {
-    'products': [],
-    'referral_points': 5,  
-    'gift_codes': {}, 
-    'subscription_channels': {}, 
-    'linked_channels': {}  
-}
+# استدعاء تهيئة الملفات
+init_files()
 
-def generate_referral_code(user_id):
-    return f"REF{user_id}"
+def load_sales() -> Dict:
+    try:
+        with open(SALES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {"sales": {}, "mode": None}
 
-def generate_gift_code():
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+def save_sales(data: Dict):
+    with open(SALES_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def generate_channel_id():
-    return ''.join(random.choices(string.ascii_uppercase, k=13))
+def read_file(filename: str) -> str:
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except:
+        return ""
 
-def generate_product_id():
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+def write_file(filename: str, content: str, append=False):
+    mode = 'a' if append else 'w'
+    with open(filename, mode, encoding='utf-8') as f:
+        f.write(content + '\n' if append else content)
 
-def register_user_if_not_exists(user_id, username):
-    if user_id not in users_data:
-        users_data[user_id] = {'points': 0, 'referrals': 0, 'referral_code': generate_referral_code(user_id), 'used_referral': False, 'gift_codes_used': set()}
+def get_users_list() -> List[str]:
+    content = read_file(USERS_FILE)
+    return [uid.strip() for uid in content.split('\n') if uid.strip()]
 
-def check_channel_subscription(user_id):
-    for channel_link, channel_data in admin_data['subscription_channels'].items():
-        try:
-            member_status = bot.get_chat_member(channel_data['channel_id'], user_id).status
-            if member_status not in ['member', 'administrator', 'creator']:
-                bot.send_message(user_id, f"عزيزي عليك الاشتراك بـ قناه : {channel_link} للتمكن من استخدام البوت 🔰")
+def add_user(user_id: int):
+    users = get_users_list()
+    if str(user_id) not in users:
+        write_file(USERS_FILE, str(user_id), append=True)
+
+def check_subscription(user_id: int) -> bool:
+    """التحقق من اشتراك المستخدم في جميع القنوات الموجودة في ملفات الاشتراك الإجباري"""
+    try:
+        # جمع كل القنوات في قائمة
+        channels = []
+        for file in [AMR0_FILE, AMR1_FILE]:  # يمكن إضافة ملفات أكثر إذا أردت
+            channel = read_file(file).strip()
+            if channel:  # إذا الملف يحتوي على قناة
+                channels.append(channel)
+        
+        # تحقق من كل قناة
+        for ch in channels:
+            try:
+                chat_member = bot.get_chat_member(ch, user_id)
+                if chat_member.status in ['left', 'kicked']:
+                    return False  # إذا لم يشترك في أي قناة، يرجع False
+            except Exception as e:
+                print(f"Error checking channel {ch}: {e}")
                 return False
-        except Exception as e:
-            bot.send_message(user_id, f"خطأ في التحقق من الاشتراك: {e}")
-            return False
-    return True
+        
+        return True  # إذا كان مشترك في كل القنوات
+    except Exception as e:
+        print(f"Error in subscription check: {e}")
+        return True  # للسماح بالدخول في حالة حدوث خطأ
 
-def get_start_markup(user_id):
-    markup = InlineKeyboardMarkup()
-    markup.row_width = 2
-    markup.add(InlineKeyboardButton("شرح استخدام البوت 📖", callback_data="usage_guide"))  # إضافة الزر الجديد
-    markup.add(InlineKeyboardButton("خدمات البوت 🛒", callback_data="show_products")) 
-    markup.add(InlineKeyboardButton(" قناه المطور ⚙️", url="https://t.me/ali313eme"))
-    markup.add(InlineKeyboardButton("مطور البوت 💻", url="https://t.me/NTBgg"))
-    markup.add(InlineKeyboardButton("ابلاغ مشكله للمطور 🖌", callback_data="report_issue"))
-    markup.add(InlineKeyboardButton("تحويل نقاط 💰", callback_data="transfer_points"))
-    markup.add(InlineKeyboardButton("ادخال كود هديه 🎁", callback_data="enter_gift_code"),
-               InlineKeyboardButton("ادخال كود احاله 💳", callback_data="enter_referral_code"))
+def create_admin_menu():
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    buttons = [
+        telebot.types.InlineKeyboardButton("قسم الاشتراك الاجباري ⚜️", callback_data="AMR78"),
+        telebot.types.InlineKeyboardButton("قسم توجيه الرسائل من الاعضاء 🔙", callback_data="yfffgh"),
+        telebot.types.InlineKeyboardButton("قسم الاذاعه 🎉", callback_data="6g77g"),
+        telebot.types.InlineKeyboardButton("احصائيات البوت 👤", callback_data="AMR7"),
+        telebot.types.InlineKeyboardButton("اعدادات البوت", callback_data="c")
+    ]
+    
+    # إضافة الأزرار واحدة تلو الأخرى
+    for button in buttons:
+        markup.add(button)
     
     return markup
 
-
-
-
-
+# أوامر البوت
 @bot.message_handler(commands=['start'])
-def welcome_message(message):
+def start_command(message):
     user_id = message.from_user.id
-    username = message.from_user.first_name
-
-
-    if not check_channel_subscription(user_id):
+    add_user(user_id)
+    
+    # التحقق من الاشتراك الإجباري
+    if not check_subscription(user_id):
+        amr0_channel = read_file(AMR0_FILE)
+        amr1_channel = read_file(AMR1_FILE)
+        channels_text = ""
+        if amr0_channel:
+            channels_text += f"{amr0_channel}\n"
+        if amr1_channel:
+            channels_text += f"{amr1_channel}\n"
+        
+        bot.send_message(
+            message.chat.id,
+            f"عذراً عزيزي، يجب عليك الإشتراك في قنوات المطور أولاً ⚜️:\n\n{channels_text}\nاشترك ثم ارسل /start 📛!",
+            parse_mode="HTML"
+        )
         return
+    
+    sales = load_sales()
+    if str(user_id) not in sales:
+        sales[str(user_id)] = {"collect": 0}
+        save_sales(sales)
+    
+    # إذا كان أدمن
+    if user_id in SUDO_USERS:
+        markup = create_admin_menu()
+        bot.send_message(
+            message.chat.id,
+            "~ اهلا بك في لوحه الأدمن الخاصه بالبوت 🤖\n\n~ يمكنك التحكم في جميع اوامر البوت من هنا\n------------------------------------",
+            reply_markup=markup
+        )
+        return
+    
+    # واجهة المستخدم العادي
+    users_count = len(get_users_list())
+    user_points = sales.get(str(user_id), {}).get("collect", 0)
+    
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    
+    # إنشاء الأزرار
+    button1 = telebot.types.InlineKeyboardButton("• العروض التي يقدمها البوت ✨", callback_data="sales")
+    button2 = telebot.types.InlineKeyboardButton("• تجميع النقاط 💸", callback_data="col")
+    button3 = telebot.types.InlineKeyboardButton("• معلومات حسابك 🔍", callback_data="myacont")
+    button4 = telebot.types.InlineKeyboardButton("• إثبات التسليم ⚖️", url=f"https://t.me/{PROOF_CHANNEL_USERNAME}")
+    button5 = telebot.types.InlineKeyboardButton("• تابعنا 🧨", url="https://t.me/ali313eme")
+    button6 = telebot.types.InlineKeyboardButton("• مطور البوت 👼", url=f"https://t.me/{ADMIN_USERNAME}")
+    
+    # إضافة الأزرار
+    markup.add(button1, button2, button3, button4, button5, button6)
+    
+    bot.send_message(
+        message.chat.id,
+        f"""*اهلا بك في بوت الماركت 🌿🥸*
 
+• يوجد بالبوت سلع مناسباً لك انشالله ✅
+• شارك الرابط الخاص بك 🍂📮
+• ثم خذ السلع التي تعجبك 🫀✨
 
-    register_user_if_not_exists(user_id, username)
+مستخدمين البوت 👤🎩: *{users_count}*
 
-    user_info = users_data[user_id]
-    bot.send_message(message.chat.id, 
-                     f"اهلا بيك 👋 {username} في بوت متجر  PS ⚡️\n\n"
-                     "من هنا تقدر تشتري سلع كتيره مدفوعه مجانا 👌🏻\n"
-                     "فقط مقابل نقاط في البوت يمكنك الحصول عليها من خلال الاحالات 🤝\n\n"
-                     f"كود الاحاله الخاص بك: ` {user_info['referral_code']} `\n"  # تنسيق كود الإحالة ككود
-                     f"عدد نقاطك: {user_info['points']} ✨\n"
-                     f"عدد احالاتك: {user_info['referrals']} ✨",
-                     reply_markup=get_start_markup(user_id),
-                     parse_mode='Markdown') 
+*• عدد نقاطك ({user_points}) 🍂📮*""",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
 
-
-@bot.message_handler(commands=['adm'])
-def admin_panel(message):
-    if message.from_user.id == YOUR_ADMIN_ID:
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("شرح اوامر الاداره 📜", callback_data="admin_commands_guide"))  # إضافة الزر الجديد
-        markup.add(InlineKeyboardButton("اضافه سلعه 🧺", callback_data="add_product"))
-        markup.add(InlineKeyboardButton("سعر الاحاله الواحده 🗞", callback_data="set_referral_price"))
-        markup.add(InlineKeyboardButton("السلع المضافة 📫", callback_data="view_products"))
-        markup.add(InlineKeyboardButton("صنع كود هديه 🎁", callback_data="create_gift_code"))
-        markup.add(InlineKeyboardButton("اضافه قناه اشتراك اجباري 📎", callback_data="add_subscription_channel"))
-        markup.add(InlineKeyboardButton("قنوات اشتراك اجباري 🔖", callback_data="view_subscription_channels"))
-        markup.add(InlineKeyboardButton("ربط قناه 📎", callback_data="link_channel"))
-        markup.add(InlineKeyboardButton("القنوات المربوطه 🔒", callback_data="view_linked_channels"))
-        markup.add(InlineKeyboardButton("احصائيات المستخدمين 📊", callback_data="user_statistics"))
-        markup.add(InlineKeyboardButton("اضافه نقاط لمستخدم 📈", callback_data="add_points"))
-        markup.add(InlineKeyboardButton("مسح نقاط 📉", callback_data="remove_points"))
-        markup.add(InlineKeyboardButton("ازاعه 📣", callback_data="broadcast_message"))  # زر الإذاعة
-        bot.send_message(message.chat.id, "اهلا بيك عزيزي المطور فـ لوحت الادمن ⚡️", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data == "admin_commands_guide")
-def admin_commands_guide(call):
-    bot.send_message(call.message.chat.id, 
-                     "شرح اوامر الاداره:\n\n"
-                     "<b>1. اضافا سلعه:</b> لإضافة سلعة جديدة للبوت.\n"
-                     "<b>2. سعر الاحاله الواحده:</b> لتعيين سعر الإحالة.\n"
-                     "<b>3. السلع المضافة:</b> لعرض السلع المضافة مسبقًا.\n"
-                     "<b>4. صنع كود هديه:</b> لإنشاء كود هدية جديد.\n"
-                     "<b>5. اضافا قناه اشتراك اجباري:</b> لإضافة قناة للاشتراك الإجباري.\n"
-                     "<b>6. قنوات اشتراك اجباري:</b> لعرض القنوات المضافة كاشتراك إجباري.\n"
-                     "<b>7. ربط قناه:</b> لربط قناة جديدة بالبوت. يمكنك من خلال هذه الميزه ربط قناه بالبوت وعند حدوث تغييرات يتم إرسالها مثل شراء مستخدم سلعة أو صنع كود هدية جديد، إلخ...\n"
-                     "<b>8. القنوات المربوطه:</b> لعرض القنوات المرتبطة.\n"
-                     "<b>9. احصائيات المستخدمين:</b> لعرض إحصائيات حول المستخدمين.\n"
-                     "<b>10. اضافا نقاط لمستخدم:</b> لإضافة نقاط لمستخدم معين.\n"
-                     "<b>11. مسح نقاط:</b> لمسح نقاط من حساب مستخدم.\n"
-                     "<b>12. ازاعه:</b> لإرسال رسالة جماعية لكل المستخدمين.",
-                     parse_mode='HTML') 
-
+# معالجة Callback Queries
 @bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
+def handle_callback(call):
     user_id = call.from_user.id
-    username = call.from_user.first_name
-
-
-    if not check_channel_subscription(user_id):
-        return
-
-    register_user_if_not_exists(user_id, username)
-
-    if call.data == "show_products":
-        show_products(call.message, 0) 
-    elif call.data == "add_product":
-        bot.send_message(call.message.chat.id, "ادخل اسم السلعة:")
-        bot.register_next_step_handler(call.message, process_product_name)
-    elif call.data == "set_referral_price":
-        bot.send_message(call.message.chat.id, "اكتب سعر الاحاله الواحده:")
-        bot.register_next_step_handler(call.message, process_referral_price)
-    elif call.data == "view_products":
-        view_admin_products(call.message, 0) 
-    elif call.data.startswith("product_"):
-        product_detail(call)
-    elif call.data.startswith("buy_"):
-        buy_product(call)
-    elif call.data.startswith("delete_"):
-        delete_product(call)
-    elif call.data == "enter_referral_code":
-        enter_referral_code(call.message)
-    elif call.data == "enter_gift_code":
-        enter_gift_code(call.message)
-    elif call.data == "create_gift_code":
-        create_gift_code(call.message)
-    elif call.data == "add_subscription_channel":
-        add_subscription_channel(call.message)
-    elif call.data == "view_subscription_channels":
-        view_subscription_channels(call.message)
-    elif call.data == "link_channel":
-        link_channel(call.message)
-    elif call.data == "view_linked_channels":
-        view_linked_channels(call.message)
-    elif call.data == "transfer_points":
-        start_points_transfer(call.message)
-    elif call.data == "user_statistics":
-        user_statistics(call.message)
-    elif call.data == "add_points":
-        add_points_to_user(call.message)
-    elif call.data == "remove_points":
-        remove_points_from_user(call.message)
-    elif call.data == "report_issue":
-        bot.send_message(call.message.chat.id, "اكتب رسالتك وسيتم ارسالها لمطور البوت:")
-        bot.register_next_step_handler(call.message, process_report_issue)
-    elif call.data == "broadcast_message":
-        bot.send_message(call.message.chat.id, "اكتب رسالتك وسيتم ارسالها لكل مستخدمين البوت:")
-        bot.register_next_step_handler(call.message, process_broadcast_message)
-    elif call.data == "usage_guide":
-        bot.send_message(call.message.chat.id, 
-                         "شرح استخدام البوت:\n\n"
-                         "1. يمكنك استخدام الأزرار المتاحة في القائمة للوصول إلى مختلف خدمات البوت.\n"
-                         "2. لتحويل النقاط، اضغط على زر 'تحويل نقاط 💰'.\n"
-                         "3. لاستخدام كود هدية، اضغط على زر 'ادخال كود هديه 🎁'.\n"
-                         "4. للإبلاغ عن أي مشكلة، استخدم زر 'ابلاغ مشكله للمطور 🖌'.\n"
-                         "5. إذا كنت بحاجة لمزيد من المساعدة، تواصل مع مطور البوت عبر زر 'مطور البوت ⚙️'.")
-        
-
-def process_report_issue(message):
-    user_id = message.from_user.id
-    report_message = message.text.strip()
-    developer_id = YOUR_ADMIN_ID 
-
-    bot.send_message(developer_id, 
-                     f"🗳 تم الابلاغ عن مشكله من {user_id}:\n{report_message}")
-    bot.send_message(message.chat.id, "تم ارسالها للمطور.")
-
-def process_broadcast_message(message):
-    broadcast_text = message.text.strip()
-    total_users = len(users_data)
-    failed_users = []
-
-    for user_id in users_data.keys():
-        try:
-            bot.send_message(user_id, broadcast_text)
-        except Exception:
-            failed_users.append(user_id)
-
-    success_count = total_users - len(failed_users)
-    bot.send_message(message.chat.id, 
-                     f"تم ارسال الرساله بنجاح\n"
-                     f"ارسلت لـ {success_count} مستخدمين\n"
-                     f"فشل ارسالها لـ {len(failed_users)} مستخدمين")
-
-
-
-
-
-
-
-def process_referral_price(message):
-    try:
-        referral_price = int(message.text)
-        admin_data['referral_points'] = referral_price
-        bot.send_message(message.chat.id, f"تم تعيين سعر الإحالة إلى {referral_price} نقاط.")
-    except ValueError:
-        bot.send_message(message.chat.id, "برجاء إدخال رقم صحيح للسعر.")
-
-def show_products(message, page):
-    products_per_page = 8
-    start_index = page * products_per_page
-    end_index = start_index + products_per_page
-    products_to_show = admin_data['products'][start_index:end_index]
-
-    if not products_to_show:
-        bot.send_message(message.chat.id, "لا توجد سلع متاحة حالياً.")
-        return
-
-    markup = InlineKeyboardMarkup()
-    for product in products_to_show:
-        markup.add(InlineKeyboardButton(f"{product['name']} | {product['points']}", callback_data=f"product_{product['id']}"))
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
     
-
-    if page > 0: 
-        markup.add(InlineKeyboardButton("السابق ⏪", callback_data=f"previous_page_{page}"))
-    if end_index < len(admin_data['products']):  
-
-        markup.add(InlineKeyboardButton("التالي ⏩", callback_data=f"next_page_{page}"))
-
-    bot.send_message(message.chat.id, f"السلع المعروضة:\n\nصفحة {page + 1} من {((len(admin_data['products']) - 1) // products_per_page) + 1}", reply_markup=markup)
-
-def view_admin_products(message, page):
-    products_per_page = 8
-    start_index = page * products_per_page
-    end_index = start_index + products_per_page
-    products_to_show = admin_data['products'][start_index:end_index]
-
-    if not products_to_show:
-        bot.send_message(message.chat.id, "لا توجد سلع مضافة حالياً.")
-        return
-
-    markup = InlineKeyboardMarkup()
-    for product in products_to_show:
-        markup.add(InlineKeyboardButton(f"{product['name']} | {product['points']}", callback_data=f"product_{product['id']}"))
+    # التحقق من صلاحيات الأدمن
+    is_admin = user_id in SUDO_USERS
     
-
-    if page > 0: 
-        markup.add(InlineKeyboardButton("السابق ⏪", callback_data=f"previous_page_{page}"))
-    if end_index < len(admin_data['products']): 
-        markup.add(InlineKeyboardButton("التالي ⏩", callback_data=f"next_page_{page}"))
-
-    bot.send_message(message.chat.id, f"السلع المضافة:\n\nصفحة {page + 1} من {((len(admin_data['products']) - 1) // products_per_page) + 1}", reply_markup=markup)
-
-def process_product_name(message):
-    product_name = message.text
-    bot.send_message(message.chat.id, "ارسل السلعة (صورة، ملف، أو نص):")
-    bot.register_next_step_handler(message, process_product_content, product_name)
-
-def process_product_content(message, product_name):
-    product_content = None
-    file_id = None
-    content_type = message.content_type
-
-    if content_type == 'text':
-        product_content = message.text
-    elif content_type == 'photo':
-        file_id = message.photo[-1].file_id
-    elif content_type == 'document':
-        file_id = message.document.file_id
-    else:
-        bot.send_message(message.chat.id, "الرجاء ارسال صورة أو ملف أو نص.")
-        return
-
-    bot.send_message(message.chat.id, "ادخل وصف السلعة:")
-    bot.register_next_step_handler(message, process_product_description, product_name, product_content, file_id, content_type)
-
-def process_product_description(message, product_name, product_content, file_id, content_type):
-    product_description = message.text
-    bot.send_message(message.chat.id, "ادخل سعر السلعة بالنقاط:")
-    bot.register_next_step_handler(message, process_product_price, product_name, product_content, file_id, product_description, content_type)
-
-def process_product_price(message, product_name, product_content, file_id, product_description, content_type):
-    try:
-        product_price = int(message.text)
-        product_id = len(admin_data['products']) + 1
-        product_identifier = generate_product_id() 
-        admin_data['products'].append({
-            'id': product_id,
-            'name': product_name,
-            'content': product_content,
-            'file_id': file_id,
-            'description': product_description,
-            'points': product_price,
-            'content_type': content_type,
-            'identifier': product_identifier 
-        })
-        bot.send_message(message.chat.id, f"تم إضافة السلعة {product_name} بنجاح بسعر {product_price} نقاط!\nمعرف السلعة: {product_identifier}")
-        
-
-        notify_linked_channels(
-            f"تم اضافه سلعه جديده للبوت ✅\n"
-            f"اسم السلعه : {product_name} ✨\n"
-            f"وصف السلعه : {product_description}\n"
-            f"سعرها : {product_price} نقطه 🔸\n"
-            f"✔️"
+    if call.data == "AMR" and is_admin:
+        markup = create_admin_menu()
+        bot.edit_message_text(
+            "~ اهلا بك في لوحه الأدمن الخاصه بالبوت 🤖\n\n~ يمكنك التحكم في جميع اوامر البوت من هنا\n------------------------------------",
+            chat_id,
+            message_id,
+            reply_markup=markup
         )
-    except ValueError:
-        bot.send_message(message.chat.id, "برجاء إدخال رقم صحيح للسعر.")
-
-
-
-
-
-
-
-
-
-def product_detail(call):
-    if not check_channel_subscription(call.from_user.id):
-        return
-
-    product_id = int(call.data.split("_")[1])
-    product = next((p for p in admin_data['products'] if p['id'] == product_id), None)
-
-    if product:
-        markup = InlineKeyboardMarkup()
-        if call.from_user.id == YOUR_ADMIN_ID:
-            markup.add(InlineKeyboardButton("حذف", callback_data=f"delete_{product_id}"))
-        markup.add(InlineKeyboardButton("شراء", callback_data=f"buy_{product_id}"))
-
-        # ✅ فقط اسم السلعة والسعر، لا ترسل المحتوى هنا
-        message_text = (
-            f"اسم السلعة: {product['name']}\n"
-            f"السعر: {product['points']} نقاط\n"
-            f"اختر ما تريد:"
-        )
-        bot.send_message(call.message.chat.id, message_text, reply_markup=markup)
-    else:
-        bot.send_message(call.message.chat.id, "السلعة غير موجودة.")
-
-def delete_product(call):
-    if not check_channel_subscription(call.from_user.id):
-        return
-
-    product_id = int(call.data.split("_")[1])
+        write_file(AMR_FILE, "")
     
-    product_index = next((index for index, p in enumerate(admin_data['products']) if p['id'] == product_id), None)
+    elif call.data == "AMR78" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        
+        # الصف الأول
+        row1 = [
+            telebot.types.InlineKeyboardButton("قناة ¹", callback_data="AMR765"),
+            telebot.types.InlineKeyboardButton("قناة ²", callback_data="AMR907")
+        ]
+        
+        # الصف الثاني
+        row2 = [
+            telebot.types.InlineKeyboardButton("عرض قنوات الإشتراك ★»", callback_data="AMR4")
+        ]
+        
+        # الصف الثالث
+        row3 = [
+            telebot.types.InlineKeyboardButton("🔙", callback_data="AMR")
+        ]
+        
+        markup.row(*row1)
+        markup.row(*row2)
+        markup.row(*row3)
+        
+        bot.edit_message_text(
+            "*مرحبا بك في قسم الاشتراك الاجباري*🌟\nاختار القناة الذي تريد التحكم به 🇪🇬",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "AMR765" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        
+        # الصف الأول
+        row1 = [
+            telebot.types.InlineKeyboardButton("وضع قناة ➕", callback_data="AMR0"),
+            telebot.types.InlineKeyboardButton("حذف قناة 📮", callback_data="delete11")
+        ]
+        
+        # الصف الثاني
+        row2 = [
+            telebot.types.InlineKeyboardButton("عرض قناة ¹", callback_data="AMR987")
+        ]
+        
+        # الصف الثالث
+        row3 = [
+            telebot.types.InlineKeyboardButton("🔙", callback_data="AMR")
+        ]
+        
+        markup.row(*row1)
+        markup.row(*row2)
+        markup.row(*row3)
+        
+        bot.edit_message_text(
+            "*مرحبا بك في التحكم ب قناة ¹*✨👇",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "AMR0" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            "حسناً، الآن قم بإرسال معرف قناتك من ثم قم برفع البوت ادمن في القناة",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+        write_file(AMR_FILE, "AMR0")
+    
+    elif call.data == "AMR987" and is_admin:
+        amr0_channel = read_file(AMR0_FILE)
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            f"القناة => {amr0_channel} √",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "delete11" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        row = [
+            telebot.types.InlineKeyboardButton("لا ❎", callback_data="AMR"),
+            telebot.types.InlineKeyboardButton("نعم ✅", callback_data="AMR1")
+        ]
+        markup.row(*row)
+        
+        bot.edit_message_text(
+            "هل أنت متأكد من أنك تريد حذف القناة من الإشتراك الإجباري؟",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+    
+    elif call.data == "AMR1" and is_admin:
+        write_file(AMR0_FILE, "")
+        write_file(AMR_FILE, "")
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            "لقد تم حذف القناة من الإشتراك الإجباري بنجاح 📮",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+    
+    elif call.data == "AMR4" and is_admin:
+        amr0_channel = read_file(AMR0_FILE)
+        amr1_channel = read_file(AMR1_FILE)
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            f"""هلا بك عزيزي 
+قنوات الاشتراك الاجباري
+ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+قناة ¹ => {amr0_channel} √
+قناة ² => {amr1_channel} √
+ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ""",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+    
+    elif call.data == "yfffgh" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        row = [
+            telebot.types.InlineKeyboardButton("تفعيل التوجيه 🔙", callback_data="AMR11"),
+            telebot.types.InlineKeyboardButton("قفل التوجيه ❎", callback_data="AMR12")
+        ]
+        markup.row(*row)
+        
+        bot.edit_message_text(
+            "*اختار ماذا تريد الان 🖤*",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "6g77g" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        row = [
+            telebot.types.InlineKeyboardButton("إذاعة توجيه 🔄", callback_data="AMR5"),
+            telebot.types.InlineKeyboardButton("إذاعة عامه 🔱", callback_data="AMR6")
+        ]
+        markup.row(*row)
+        
+        bot.edit_message_text(
+            "*اختار نوع الاذاعه الان*",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "AMR5" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            "قم برسال التوجيه الان 💚",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+        write_file(AMR_FILE, "AMR2")
+    
+    elif call.data == "AMR6" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            "قم برسال المراد الاذاعه له الان 💛",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+        write_file(AMR_FILE, "AMR3")
+    
+    elif call.data == "AMR7" and is_admin:
+        users_count = len(get_users_list())
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            f"""هلا بك في قسم الاحصايات 💛
+ــــــــــــــــــــ؍.َِ⇣𖤍🖤ء͡⇣ــــــــــــــــــ
 
-    if product_index is not None:
-        deleted_product = admin_data['products'].pop(product_index)
-        bot.send_message(call.message.chat.id, f"تم حذف السلعة بنجاح.\nمعرف السلعة المحذوف: {deleted_product['identifier']}")
-    else:
-        bot.send_message(call.message.chat.id, "فشل الحذف، السلعة غير موجودة.")
+ عدد مشتركين البوت  [ {users_count} ]
 
-def buy_product(call):
-    if not check_channel_subscription(call.from_user.id):
-        return
+حاله سرعه البوت -: 100%
+ــــــــــــــــــــ؍.َِ⇣𖤍🖤ء͡⇣ــــــــــــــــــ""",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+        write_file(AMR_FILE, "")
+    
+    elif call.data == "AMR11" and is_admin:
+        write_file(AMR3_FILE, "AMR")
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            "تم تنفيذ الامر ✅",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+    
+    elif call.data == "AMR12" and is_admin:
+        write_file(AMR3_FILE, "")
+        write_file(AMR_FILE, "")
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+        
+        bot.edit_message_text(
+            "تم تنفيذ الامر ❎",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+    
+    elif call.data == "c" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+        
+        # الصف الأول
+        row1 = [
+            telebot.types.InlineKeyboardButton("اضف سلعة 🔨", callback_data="add"),
+            telebot.types.InlineKeyboardButton("حذف سلعة 🗑", callback_data="del")
+        ]
+        
+        # الصف الثاني
+        row2 = [
+            telebot.types.InlineKeyboardButton("ارسال نقاط", callback_data="addcon"),
+            telebot.types.InlineKeyboardButton("خصم نقاط", callback_data="delcon")
+        ]
+        
+        # الصف الثالث
+        row3 = [
+            telebot.types.InlineKeyboardButton("رجوع", callback_data="AMR")
+        ]
+        
+        markup.row(*row1)
+        markup.row(*row2)
+        markup.row(*row3)
+        
+        bot.edit_message_text(
+            f"مرحباً عزيزي المطور (@{call.from_user.username}) 🔥.",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+        sales = load_sales()
+        sales["mode"] = None
+        save_sales(sales)
+    
+    elif call.data == "add" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("الغاء 🚫", callback_data="c"))
+        
+        bot.edit_message_text(
+            "قم بأرسال اسم السلعة 📬",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+        sales = load_sales()
+        sales["mode"] = "add"
+        save_sales(sales)
+    
+    elif call.data == "del" and is_admin:
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("الغاء 🚫", callback_data="c"))
+        
+        bot.edit_message_text(
+            "قم بأرسال كود السلعة 📬",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+        sales = load_sales()
+        sales["mode"] = "del"
+        save_sales(sales)
+    
+    elif call.data == "addcon" and is_admin:
+        bot.edit_message_text(
+            "أرسل أيدي الشخص الذي تريد إرسال النقاط له",
+            chat_id,
+            message_id
+        )
+        sales = load_sales()
+        sales["mode"] = "chat"
+        save_sales(sales)
+    
+    elif call.data == "delcon" and is_admin:
+        bot.edit_message_text(
+            "أرسل أيدي الشخص الذي تريد خصم النقاط منه",
+            chat_id,
+            message_id
+        )
+        sales = load_sales()
+        sales["mode"] = "chat1"
+        save_sales(sales)
+    
+    elif call.data == "bae":
+        sales = load_sales()
+        users_count = len(get_users_list())
+        user_points = sales.get(str(user_id), {}).get("collect", 0)
+        
+        markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+        
+        # إنشاء الأزرار
+        buttons = [
+            telebot.types.InlineKeyboardButton("• العروض التي يقدمها البوت ✨", callback_data="sales"),
+            telebot.types.InlineKeyboardButton("• تجميع النقاط 💸", callback_data="col"),
+            telebot.types.InlineKeyboardButton("• معلومات حسابك 🔍", callback_data="myacont"),
+            telebot.types.InlineKeyboardButton("• إثبات التسليم ⚖️", url=f"https://t.me/{PROOF_CHANNEL_USERNAME}"),
+            telebot.types.InlineKeyboardButton("• تابعنا 🧨", url="https://t.me/amrakl"),
+            telebot.types.InlineKeyboardButton("• مطور البوت 👼", url=f"https://t.me/{ADMIN_USERNAME}")
+        ]
+        
+        for button in buttons:
+            markup.add(button)
+        
+        bot.edit_message_text(
+            f"""*اهلا بك في بوت الماركت 🌿🥸*
 
-    user_id = call.from_user.id
-    product_id = int(call.data.split("_")[1])
-    product = next((p for p in admin_data['products'] if p['id'] == product_id), None)
+• يوجد بالبوت سلع مناسباً لك انشالله ✅
+• شارك الرابط الخاص بك 🍂📮
+• ثم خذ السلع التي تعجبك 🫀✨
 
-    if product:
-        user_points = users_data[user_id]['points']
-        if user_points >= product['points']:
-            users_data[user_id]['points'] -= product['points']
+مستخدمين البوت 👤🎩: *{users_count}*
 
-            if product['content_type'] == 'text':
-                message_text = (
-                    f"تم شراء السلعة بنجاح: {product['name']}!\n"
-                    f"السلعة:\n{product['content']}\n"  
-                    f"وصف:\n{product['description']}" 
+*• عدد نقاطك ({user_points}) 🍂📮*""",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "myacont":
+        sales = load_sales()
+        user_points = sales.get(str(user_id), {}).get("collect", 0)
+        user = call.from_user
+        
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("رجوع", callback_data="bae"))
+        
+        bot.edit_message_text(
+            f"""*معلومات حسابك عزيزي*
+
+اسمك: {user.first_name or ''} {user.last_name or ''}
+معرفك: @{user.username if user.username else 'لا يوجد'}
+ايدي: {user_id}
+نقاطك: {user_points}""",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "col":
+        bot_username = bot.get_me().username
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.row(telebot.types.InlineKeyboardButton("رجوع", callback_data="bae"))
+        
+        bot.edit_message_text(
+            f"""*انسخ الرابط ثم قم بمشاركته مع اصدقائك 📥.*
+
+• كل شخص يقوم بالدخول ستحصل على *1* نقطه
+
+*- بإمكانك عمل اعلان خاص برابط الدعوة الخاص بك* 
+
+~ رابط الدعوة: https://t.me/{bot_username}?start={user_id}""",
+            chat_id,
+            message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    elif call.data == "sales":
+        sales_data = load_sales()
+        markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+        
+        # رأس الجدول
+        markup.row(
+            telebot.types.InlineKeyboardButton("💵┇السعر", callback_data="s"),
+            telebot.types.InlineKeyboardButton("ℹ️┇الاسم", callback_data="s")
+        )
+        
+        # إضافة السلع
+        for code, item in sales_data.get("sales", {}).items():
+            markup.row(
+                telebot.types.InlineKeyboardButton(str(item["price"]), callback_data=code),
+                telebot.types.InlineKeyboardButton(item["name"], callback_data=code)
+            )
+        
+        bot.edit_message_text(
+            "العروض التي يقدمها البوت 🔥",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+    
+    elif call.data == "yes":
+        sales = load_sales()
+        if "mode" in sales and sales["mode"]:
+            code = sales["mode"]
+            item = sales["sales"].get(code)
+            if item:
+                user = call.from_user
+                bot.edit_message_text(
+                    f"تم ارسال طلبك لمالك البوت ✨\nقم بمراسلته لينفذ طلبك... @{ADMIN_USERNAME}",
+                    chat_id,
+                    message_id
                 )
-                bot.send_message(call.message.chat.id, message_text)
-            elif product['content_type'] == 'photo':
-                bot.send_photo(call.message.chat.id, product['file_id'], caption=f"اسم السلعة: {product['name']}\nوصف السلعة:\n{product['description']}")
-            elif product['content_type'] == 'document':
-                bot.send_document(call.message.chat.id, product['file_id'], caption=f"اسم السلعة: {product['name']}\nوصف السلعة:\n{product['description']}")
+                try:
+                    bot.send_message(
+                        ADMIN_ID,
+                        f"@{user.username if user.username else user.first_name}\n - قام بشراء {item['name']} بسعر {item['price']} 🧨"
+                    )
+                    bot.send_message(
+                        PROOF_CHANNEL_ID,
+                        f"""*قام البوت بتسليم طلب جديد* 
+                        
+*السلعة:* {item['name']}
 
-            notify_linked_channels(
-                f"تم اتمام عمليه الشراء من المستخدم : {user_id} ✅\n"
-                f"السلعه : {product['name']} 📚\n"
-                f"عدد نقاطه الحالي : {users_data[user_id]['points']} 🔸\n"
-                f"عدد نقاط السلعه : {product['points']} 🔸"
+*السعر:* {item['price']}
+
+*العضو:* @{user.username if user.username else 'لا يوجد'}
+
+*ايدي:* {user_id}""",
+                        parse_mode="Markdown"
+                    )
+                    sales[str(user_id)]["collect"] -= item["price"]
+                    sales["mode"] = None
+                    save_sales(sales)
+                except Exception as e:
+                    print(f"Error in purchase: {e}")
+    
+    elif call.data != "s":  # إذا كان كود سلعة
+        sales = load_sales()
+        item = sales["sales"].get(call.data)
+        if item:
+            user_points = sales.get(str(user_id), {}).get("collect", 0)
+            if user_points >= item["price"]:
+                markup = telebot.types.InlineKeyboardMarkup()
+                markup.row(
+                    telebot.types.InlineKeyboardButton("نعم 🔥", callback_data="yes"),
+                    telebot.types.InlineKeyboardButton("لا 🚫", callback_data="sales")
+                )
+                bot.edit_message_text(
+                    f"هل انت متأكد من شراء {item['name']} بسعر {item['price']}؟ 🕸",
+                    chat_id,
+                    message_id,
+                    reply_markup=markup
+                )
+                sales["mode"] = call.data
+                save_sales(sales)
+            else:
+                bot.answer_callback_query(call.id, "ليس لديك نقاط كافية للشراء 🚫", show_alert=True)
+
+# معالجة الرسائل النصية
+@bot.message_handler(func=lambda message: True)
+def handle_messages(message):
+    user_id = message.from_user.id
+    text = message.text
+    sales = load_sales()
+    mode = sales.get("mode")
+    amr_mode = read_file(AMR_FILE)
+    
+    # التحقق من الاشتراك الإجباري
+    if not check_subscription(user_id) and text != "/start":
+        amr0_channel = read_file(AMR0_FILE)
+        amr1_channel = read_file(AMR1_FILE)
+        channels_text = ""
+        if amr0_channel:
+            channels_text += f"{amr0_channel}\n"
+        if amr1_channel:
+            channels_text += f"{amr1_channel}\n"
+        
+        bot.send_message(
+            message.chat.id,
+            f"عذراً عزيزي، يجب عليك الإشتراك في قنوات المطور أولاً ⚜️:\n\n{channels_text}\nاشترك ثم ارسل /start 📛!",
+            parse_mode="HTML"
+        )
+        return
+    
+    # معالجة أوضاع الأدمن
+    if user_id in SUDO_USERS:
+        if amr_mode == "AMR0" and user_id == ADMIN_ID:
+            write_file(AMR0_FILE, text)
+            write_file(AMR_FILE, "")
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+            
+            bot.send_message(
+                message.chat.id,
+                "لقد تم وضع القناة بنجاح ✅",
+                reply_markup=markup
+            )
+        
+        elif amr_mode == "AMR2" and user_id == ADMIN_ID:
+            users = get_users_list()
+            success_count = 0
+            for uid in users:
+                try:
+                    bot.forward_message(int(uid), user_id, message.message_id)
+                    success_count += 1
+                except Exception as e:
+                    print(f"Error forwarding to {uid}: {e}")
+                    continue
+            
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+            
+            bot.send_message(
+                message.chat.id,
+                f"تم توجيه الرسالة إلى {success_count} مستخدم",
+                reply_markup=markup
+            )
+            write_file(AMR_FILE, "")
+        
+        elif amr_mode == "AMR3" and user_id == ADMIN_ID:
+            users = get_users_list()
+            success_count = 0
+            for uid in users:
+                try:
+                    bot.send_message(int(uid), text)
+                    success_count += 1
+                except Exception as e:
+                    print(f"Error broadcasting to {uid}: {e}")
+                    continue
+            
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.row(telebot.types.InlineKeyboardButton("🔙", callback_data="AMR"))
+            
+            bot.send_message(
+                message.chat.id,
+                f"تم النشر بنجاح إلى {success_count} مستخدم ✅",
+                reply_markup=markup
+            )
+            write_file(AMR_FILE, "")
+    
+    # معالجة أوضاع الإدارة
+    if mode == "add" and user_id in SUDO_USERS:
+        sales["n"] = text
+        sales["mode"] = "addm"
+        save_sales(sales)
+        bot.send_message(message.chat.id, "تم الحفظ ✅.\nالان ارسل عدد النقاط (السعر) المطلوبة للشراء 💸... رقم فقط")
+    
+    elif mode == "addm" and user_id in SUDO_USERS and text.isdigit():
+        code = ''.join(random.choices(string.ascii_lowercase + string.digits, k=7))
+        sales["sales"][code] = {
+            "name": sales["n"],
+            "price": int(text)
+        }
+        sales["n"] = None
+        sales["mode"] = None
+        save_sales(sales)
+        bot.send_message(
+            message.chat.id,
+            f"""تم الحفظ السلعة ✅.
+ℹ️┇الاسم: {sales['sales'][code]['name']}
+💵┇السعر: {sales['sales'][code]['price']}
+⛓┇كود السلعة: {code}"""
+        )
+    
+    elif mode == "del" and user_id in SUDO_USERS:
+        if text in sales["sales"]:
+            item = sales["sales"].pop(text)
+            sales["mode"] = None
+            save_sales(sales)
+            bot.send_message(
+                message.chat.id,
+                f"""تم حذف السلعة ✅.
+ℹ️┇الاسم: {item['name']}
+💵┇السعر: {item['price']}
+⛓┇كود السلعة: {text}"""
             )
         else:
-            bot.send_message(call.message.chat.id, 
-                             f"عذراً، نقاطك غير كافية. لديك: {user_points} نقاط و سعر السلعة: {product['points']} نقاط.\n"
-                             f"لتجميع نقاط استعمل رمز الاحاله الخاص بك: {users_data[user_id]['referral_code']}")
-    else:
-        bot.send_message(call.message.chat.id, "السلعة غير موجودة.")
-
-def enter_referral_code(message):
-    user_id = message.from_user.id
-    username = message.from_user.first_name
-
-    if not check_channel_subscription(user_id):
-        return
-
-
-    register_user_if_not_exists(user_id, username)
-
-    if users_data[user_id]['used_referral']:
-        bot.send_message(message.chat.id, "الحد الاقصي للحساب الواحد في ادخال كود الاحاله هوا 1 لم تصل الاحاله ❌")
-        return
+            bot.send_message(message.chat.id, "الكود الذي ارسلته غير موجود 🚫!")
     
-    bot.send_message(message.chat.id, "اكتب كود الاحاله:")
-    bot.register_next_step_handler(message, process_referral_code)
-
-def process_referral_code(message):
-    user_id = message.from_user.id
-    referral_code = message.text.strip()
-
-    if not check_channel_subscription(user_id):
-        return
-
-    if users_data[user_id]['used_referral']:
-        bot.send_message(message.chat.id, "الحد الاقصي للحساب الواحد في ادخال كود الاحاله هوا 1 لم تصل الاحاله ❌")
-        return
-
-    for uid, udata in users_data.items():
-        if udata['referral_code'] == referral_code and uid != user_id:
-            users_data[uid]['points'] += admin_data['referral_points']
-            users_data[uid]['referrals'] += 1
-            users_data[user_id]['used_referral'] = True
-
-
-            bot.send_message(uid, 
-                             f"🔸تم تسجيل ({user_id}) | نقاط مكتسبه {admin_data['referral_points']} عدد نقاطك الكلي {users_data[uid]['points']}🔸")
-            
-
-            bot.send_message(message.chat.id, "تم تسجيل الاحاله بنجاح")
-            return
+    elif mode == "chat" and user_id in SUDO_USERS and text.isdigit():
+        sales["idd"] = text
+        sales["mode"] = "poi"
+        save_sales(sales)
+        bot.send_message(message.chat.id, "أرسل الكمية التي تريد إرسالها")
     
-    bot.send_message(message.chat.id, "الكود خطأ او انت سجلت بـ كود من قبل ❌")
-
-def create_gift_code(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    bot.send_message(message.chat.id, "ادخل عدد النقاط في كود الهدية:")
-    bot.register_next_step_handler(message, process_gift_points)
-
-def process_gift_points(message):
-    try:
-        points = int(message.text)
-        bot.send_message(message.chat.id, "ادخل عدد الأشخاص الذين يمكنهم الحصول على الهدية:")
-        bot.register_next_step_handler(message, process_gift_people_count, points)
-    except ValueError:
-        bot.send_message(message.chat.id, "برجاء إدخال رقم صحيح للنقاط.")
-
-def process_gift_people_count(message, points):
-    try:
-        people_count = int(message.text)
-        bot.send_message(message.chat.id, "ادخل مدة الكود (مثل d 1):")
-        bot.register_next_step_handler(message, process_gift_duration, points, people_count)
-    except ValueError:
-        bot.send_message(message.chat.id, "برجاء إدخال رقم صحيح لعدد الأشخاص.")
-
-def process_gift_duration(message, points, people_count):
-    try:
-        duration = message.text.strip().split()
-        time_unit = duration[0]
-        time_value = int(duration[1])
-
-        if time_unit not in ['m', 'h', 'd', 'mm', 'yy']:
-            raise ValueError("وحدة زمنية غير صحيحة.")
-
-
-        if time_unit == 'm':
-            expiry_date = datetime.now() + timedelta(minutes=time_value)
-        elif time_unit == 'h':
-            expiry_date = datetime.now() + timedelta(hours=time_value)
-        elif time_unit == 'd':
-            expiry_date = datetime.now() + timedelta(days=time_value)
-        elif time_unit == 'mm':
-            expiry_date = datetime.now() + timedelta(days=30 * time_value)
-        elif time_unit == 'yy':
-            expiry_date = datetime.now() + timedelta(days=365 * time_value)
-
-
-        gift_code = generate_gift_code()
-        admin_data['gift_codes'][gift_code] = {
-            'points': points,
-            'people_count': people_count,
-            'expiry_date': expiry_date,
-            'used_by': set()
-        }
-
-
-        bot.send_message(message.chat.id,
-                         f"تم صنع كود هدية جديد 🎉\n"
-                         f"الكود: `{gift_code}` 🎁\n"  
-                         f"متاح لـ {people_count} شخص\n"
-                         f"تاريخ الانتهاء: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')} 📆\n"
-                         f"✔️",
-                         parse_mode='Markdown') 
+    elif mode == "poi" and user_id in SUDO_USERS and text.isdigit():
+        amount = int(text)
+        target_id = sales["idd"]
         
-
-        notify_linked_channels(
-            f"تم صنع كود هدية جديد 🎉\n"
-            f"الكود: `{gift_code}` 🎁\n" 
-            f"متاح لـ {people_count} شخص\n"
-            f"تاريخ الانتهاء: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')} 📆\n"
-            f"✔️"
-        )  
-    
-    except (ValueError, IndexError):
-        bot.send_message(message.chat.id, "صيغة غير صحيحة للمدة. استخدم صيغة مثل d 1.")
-
-
-def enter_gift_code(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    bot.send_message(message.chat.id, "ادخل كود الهدية:")
-    bot.register_next_step_handler(message, process_gift_code)
-
-def process_gift_code(message):
-    user_id = message.from_user.id
-    gift_code = message.text.strip()
-
-    if not check_channel_subscription(user_id):
-        return
-
-    if gift_code not in admin_data['gift_codes']:
-        bot.send_message(message.chat.id, "الكود غير صحيح.")
-        return
-
-    code_data = admin_data['gift_codes'][gift_code]
-
-    if user_id in code_data['used_by']:
-        bot.send_message(message.chat.id, "قد حصلت على هذه الهدية من قبل.")
-        return
-
-    if len(code_data['used_by']) >= code_data['people_count']:
-        bot.send_message(message.chat.id, "عدد المستخدمين لهذا الكود مكتمل.")
-        return
-
-    if datetime.now() > code_data['expiry_date']:
-        bot.send_message(message.chat.id, "الكود منتهي الصلاحية.")
-        return
-
-    code_data['used_by'].add(user_id)
-
-    previous_points = users_data[user_id]['points']
-    users_data[user_id]['points'] += code_data['points']
-    current_points = users_data[user_id]['points']
-
-    bot.send_message(message.chat.id,
-                     f"تم الحصول على الهدية 🎁\n"
-                     f"نقاطك قبل: {previous_points}\n"
-                     f"نقاطك بعد: {current_points}")
-
-def add_subscription_channel(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    bot.send_message(message.chat.id, "ادخل رابط القناة لإضافتها كاشتراك إجباري:")
-    bot.register_next_step_handler(message, process_subscription_channel)
-
-def process_subscription_channel(message):
-    channel_link = message.text.strip()
-
-    try:
-        channel_id = bot.get_chat(channel_link).id
-        channel_identifier = generate_channel_id()
-        admin_data['subscription_channels'][channel_link] = {'channel_id': channel_id, 'identifier': channel_identifier}
-        bot.send_message(message.chat.id, "تم إضافة اشتراك إجباري بنجاح.")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"حدث خطأ في إضافة القناة: {e}")
-
-def view_subscription_channels(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    if not admin_data['subscription_channels']:
-        bot.send_message(message.chat.id, "لا توجد قنوات اشتراك إجباري حالياً.")
-        return
-
-    channels_info = "قنواتك اشتراك إجباري:\n\n"
-    for link, data in admin_data['subscription_channels'].items():
-        channels_info += f"{link} : معرف القناة : {data['identifier']}\n"
-
-    bot.send_message(message.chat.id, channels_info)
-
-def link_channel(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    bot.send_message(message.chat.id, "ادخل معرف القناة لربطها بالبوت:")
-    bot.register_next_step_handler(message, process_link_channel)
-
-def process_link_channel(message):
-    channel_username = message.text.strip()
-
-    try:
-        chat = bot.get_chat(channel_username)
-        if chat.type != "channel":
-            bot.send_message(message.chat.id, "هذا المعرف ليس لقناة.")
-            return
-
-        channel_id = chat.id
-        channel_identifier = generate_channel_id()
-        admin_data['linked_channels'][channel_username] = {'channel_id': channel_id, 'identifier': channel_identifier}
-        bot.send_message(message.chat.id, "تم الربط بنجاح. تأكد من أن البوت أدمن في القناة.")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"حدث خطأ في ربط القناة: {e}")
-
-def view_linked_channels(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    if not admin_data['linked_channels']:
-        bot.send_message(message.chat.id, "لا توجد قنوات مربوطة حالياً.")
-        return
-
-    channels_info = "القنوات المربوطة:\n\n"
-    for username, data in admin_data['linked_channels'].items():
-        channels_info += f"{username} : معرف القناة : {data['identifier']}\n"
-
-    bot.send_message(message.chat.id, channels_info)
-
-def notify_linked_channels(message_text):
-    for channel_data in admin_data['linked_channels'].values():
+        # التأكد من وجود المستخدم في sales
+        if target_id not in sales:
+            sales[target_id] = {"collect": 0}
+        
+        sales[target_id]["collect"] = sales.get(target_id, {"collect": 0})["collect"] + amount
+        sales["mode"] = None
+        sales["idd"] = None
+        save_sales(sales)
+        
+        bot.send_message(message.chat.id, f"تم إضافة {amount} نقطة إلى حساب {target_id} بنجاح")
         try:
-            bot.send_message(channel_data['channel_id'], message_text)
-        except Exception as e:
-            print(f"خطأ في إرسال الرسالة إلى القناة {channel_data['channel_id']}: {e}")
-
-@bot.message_handler(commands=['del'])
-def delete_subscription_channel(message):
-    try:
-        channel_identifier = message.text.split()[1].strip()
-        channel_link_to_delete = None
-
-        for link, data in admin_data['subscription_channels'].items():
-            if data['identifier'] == channel_identifier:
-                channel_link_to_delete = link
-                break
-
-        if channel_link_to_delete:
-            del admin_data['subscription_channels'][channel_link_to_delete]
-            bot.send_message(message.chat.id, "تم مسح القناة بنجاح.")
-        else:
-            bot.send_message(message.chat.id, "لم يتم العثور على القناة بالمعرف المدخل.")
-    except IndexError:
-        bot.send_message(message.chat.id, "يرجى إدخال الأمر بالشكل الصحيح: /del <معرف القناة>")
-
-@bot.message_handler(commands=['delr'])
-def delete_linked_channel(message):
-    try:
-        channel_identifier = message.text.split()[1].strip()
-        channel_link_to_delete = None
-
-        for username, data in admin_data['linked_channels'].items():
-            if data['identifier'] == channel_identifier:
-                channel_link_to_delete = username
-                break
-
-        if channel_link_to_delete:
-            del admin_data['linked_channels'][channel_link_to_delete]
-            bot.send_message(message.chat.id, "تم مسح قناة الربط بنجاح.")
-        else:
-            bot.send_message(message.chat.id, "لم يتم العثور على القناة بالمعرف المدخل.")
-    except IndexError:
-        bot.send_message(message.chat.id, "يرجى إدخال الأمر بالشكل الصحيح: /delr <معرف القناة>")
-
-def start_points_transfer(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    bot.send_message(message.chat.id, "ادخل ID الشخص لتحويل نقاط اليه:")
-    bot.register_next_step_handler(message, process_transfer_id)
-
-def process_transfer_id(message):
-    try:
-        target_user_id = int(message.text.strip())
-        if target_user_id not in users_data:
-            bot.send_message(message.chat.id, "المعرف غير موجود في قاعدة البيانات.")
-        else:
-            bot.send_message(message.chat.id, "اكتب عدد نقاط المراد تحويلها للمستخدم | لالغاء العمليه اضغط /st")
-            bot.register_next_step_handler(message, process_transfer_amount, target_user_id)
-    except ValueError:
-        bot.send_message(message.chat.id, "يرجى إدخال معرف صالح.")
-
-def process_transfer_amount(message, target_user_id):
-    if message.text.strip() == "/st":
-        bot.send_message(message.chat.id, "تم ايقاف العمليه.")
-        return
-
-    try:
-        transfer_amount = int(message.text.strip())
-        sender_user_id = message.from_user.id
-
-        if transfer_amount <= 0:
-            bot.send_message(message.chat.id, "يرجى إدخال مبلغ صحيح.")
-            return
-
-        if users_data[sender_user_id]['points'] < transfer_amount:
-            bot.send_message(message.chat.id, "عزيزي نقاطك غير كافيه 🔸\nلا يمكنك تحويل نقاط.")
-            return
-
-        users_data[sender_user_id]['points'] -= transfer_amount
-        users_data[target_user_id]['points'] += transfer_amount
-
-        bot.send_message(message.chat.id,
-                         f"تم اكتمال عمليه التحويل بنجاح ✅\n"
-                         f"المحول اليه : {target_user_id} ✨\n"
-                         f"المبلغ المحول : {transfer_amount} 🔸\n"
-                         f"عدد نقاطك الحالي : {users_data[sender_user_id]['points']} 🔸\n"
-                         f"✔️")
-
-
-        bot.send_message(target_user_id,
-                         f"تم تحويل مبلغ {transfer_amount} ✅\n"
-                         f"الشخص المحول : {sender_user_id} ✨\n"
-                         f"عدد نقاطك الكلي : {users_data[target_user_id]['points']} 🔸\n"
-                         f"✔️")
-    except ValueError:
-        bot.send_message(message.chat.id, "يرجى إدخال مبلغ صحيح.")
-
-def user_statistics(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    statistics = "إحصائيات المستخدمين:\n\n"
-    total_users = len(users_data)
-    for user_id, data in users_data.items():
-        statistics += f"{user_id} | {data['points']}\n"
-
-    statistics += f"\nعدد المستخدمين الكلي للبوت: {total_users}"
-
-    bot.send_message(message.chat.id, statistics)
-
-def add_points_to_user(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    bot.send_message(message.chat.id, "اكتب معرف المستخدم او كود الاحاله الخاص به:")
-    bot.register_next_step_handler(message, process_add_points_user)
-
-def process_add_points_user(message):
-    user_identifier = message.text.strip()
-    target_user_id = None
-
-
-    for user_id, user_data in users_data.items():
-        if str(user_id) == user_identifier or user_data['referral_code'] == user_identifier:
-            target_user_id = user_id
-            break
-
-    if target_user_id is None:
-        bot.send_message(message.chat.id, "المستخدم غير موجود.")
-    else:
-        bot.send_message(message.chat.id, "ادخل عدد نقاط المراد ارسالها:")
-        bot.register_next_step_handler(message, process_add_points_amount, target_user_id)
-
-def process_add_points_amount(message, target_user_id):
-    try:
-        points_to_add = int(message.text.strip())
-        if points_to_add <= 0:
-            bot.send_message(message.chat.id, "برجاء إدخال عدد نقاط صحيح.")
-            return
-
-        previous_points = users_data[target_user_id]['points']
-        users_data[target_user_id]['points'] += points_to_add
-        current_points = users_data[target_user_id]['points']
-
-        bot.send_message(message.chat.id,
-                         f"تم ارسال النقاط للمستخدم ✅\n"
-                         f"نقاطه قبل: {previous_points} 🔸\n"
-                         f"نقاطه بعد: {current_points} 🔸\n"
-                         f"✔️")
-
-        bot.send_message(target_user_id,
-                         f"قام مالك البوت بأرسال اليك نقاط ✅\n"
-                         f"عدد النقاط المرسله: {points_to_add} 🔸\n"
-                         f"عدد نقاطك الكلي: {current_points} 🔸\n"
-                         f"✔️")
-    except ValueError:
-        bot.send_message(message.chat.id, "برجاء إدخال عدد نقاط صحيح.")
-
-def remove_points_from_user(message):
-    if not check_channel_subscription(message.from_user.id):
-        return
-
-    bot.send_message(message.chat.id, "اكتب معرف المستخدم او كود الاحاله الخاص به:")
-    bot.register_next_step_handler(message, process_remove_points_user)
-
-def process_remove_points_user(message):
-    user_identifier = message.text.strip()
-    target_user_id = None
-
-
-    for user_id, user_data in users_data.items():
-        if str(user_id) == user_identifier or user_data['referral_code'] == user_identifier:
-            target_user_id = user_id
-            break
-
-    if target_user_id is None:
-        bot.send_message(message.chat.id, "المستخدم غير موجود.")
-    else:
-        user_points = users_data[target_user_id]['points']
-        bot.send_message(message.chat.id,
-                         f"نقاط المستخدم: {user_points}\n"
-                         "اكتب عدد نقاط لمسحه | لالغاء العمليه اكتب /str")
-        bot.register_next_step_handler(message, process_remove_points_amount, target_user_id)
-
-def process_remove_points_amount(message, target_user_id):
-    if message.text.strip() == "/str":
-        bot.send_message(message.chat.id, "تم ايقاف العمليه ✅")
-        return
-
-    try:
-        points_to_remove = int(message.text.strip())
-        if points_to_remove <= 0:
-            bot.send_message(message.chat.id, "برجاء إدخال عدد نقاط صحيح.")
-            return
-
-        user_points = users_data[target_user_id]['points']
-
-        if user_points < points_to_remove:
-            bot.send_message(message.chat.id, 
-                             f"لا يمكنك مسح {points_to_remove} نقطه من {user_points} نقطه\n"
-                             f"يمكنك مسح {user_points}")
-            return
-
-        users_data[target_user_id]['points'] -= points_to_remove
-        current_points = users_data[target_user_id]['points']
-
-        bot.send_message(message.chat.id, 
-                         f"تم مسح نقاط مستخدم ✅\n"
-                         f"عدد النقاط الممسوحه: {points_to_remove} 🔸\n"
-                         f"عدد نقاطه الحالي: {current_points} 🔸\n"
-                         f"✔️")
-
-        bot.send_message(target_user_id,
-                         f"قام المالك بحذف نقاط منك 🔹\n"
-                         f"عدد النقاط الممسوحه: {points_to_remove} 🔸\n"
-                         f"عدد نقاطه الحالي: {current_points} 🔸\n"
-                         f"🔴")
-    except ValueError:
-        bot.send_message(message.chat.id, "برجاء إدخال عدد نقاط صحيح.")
+            bot.send_message(int(target_id), f"تمت إضافة {amount} نقطة إلى حسابك في البوت من قبل المطور")
+        except:
+            pass
     
+    elif mode == "chat1" and user_id in SUDO_USERS and text.isdigit():
+        sales["idd"] = text
+        sales["mode"] = "poi1"
+        save_sales(sales)
+        bot.send_message(message.chat.id, "أرسل الكمية التي تريد خصمها")
+    
+    elif mode == "poi1" and user_id in SUDO_USERS and text.isdigit():
+        amount = int(text)
+        target_id = sales["idd"]
+        
+        if target_id in sales:
+            sales[target_id]["collect"] = max(0, sales[target_id].get("collect", 0) - amount)
+        
+        sales["mode"] = None
+        sales["idd"] = None
+        save_sales(sales)
+        
+        bot.send_message(message.chat.id, f"تم خصم {amount} نقطة من حساب {target_id} بنجاح")
+        try:
+            bot.send_message(int(target_id), f"تمت خصم {amount} نقطة من حسابك في البوت من قبل المطور")
+        except:
+            pass
+    
+    # توجيه الرسائل إذا كان التوجيه مفعلاً
+    amr3_content = read_file(AMR3_FILE)
+    if amr3_content == "AMR" and user_id != ADMIN_ID:
+        try:
+            bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
+        except Exception as e:
+            print(f"Error forwarding message: {e}")
 
-
-
-bot.infinity_polling()
+# تشغيل البوت
+if __name__ == "__main__":
+    print("Bot is running...")
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        print(f"Error: {e}")
+        bot.infinity_polling()
