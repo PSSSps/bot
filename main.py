@@ -11,7 +11,7 @@ TOKEN = '8554107823:AAG-YHE7DqNgAihEgRGYSiy0TL-S5QWmur4'  # توكن بوتك
 ADMIN_ID = 1595285929  # ايدي المطور
 ADMIN_USERNAME = 'NTBgg'  # معرف الادمن دون @
 PROOF_CHANNEL_ID = '1003682497574'  # ايدي قناة الاثبات
-PROOF_CHANNEL_USERNAME = '@ps01ps'  # معرف قناة إثبات
+PROOF_CHANNEL_USERNAME = 'ps01ps'  # معرف قناة إثبات
 SUDO_USERS = [ADMIN_ID, 000, 0000]  # ايدهات الادمن
 
 bot = telebot.TeleBot(TOKEN)
